@@ -85,6 +85,13 @@ test("readLogFile: file tidak ada", () => {
   assert.deepEqual(readLogFile("/nonexistent/path.jsonl"), [])
 })
 
+test("buildReport: tanpa data tetap berformat", () => {
+  const report = buildReport([], "s-empty", new Date("2026-09-23T10:00:00.000Z"))
+  assert.match(report, /Sesi ini/)
+  assert.match(report, /Hari ini \(semua sesi\)/)
+  assert.match(report, /\$0/)
+})
+
 test("buildReport: berisi baris sesi + hari ini", () => {
   const entries: LogEntry[] = [
     { type: "tokens", ts: Date.UTC(2026, 8, 23, 1, 0, 0), sessionId: "s1", messageId: "m1", input: 1000, output: 500, reasoning: 100, cacheRead: 0, cacheWrite: 0, cost: 0.01 },

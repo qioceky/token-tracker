@@ -104,6 +104,21 @@ export default Plugin.define({
       }
     })()
 
+    await ctx.command.transform((editor) => {
+      editor.add({
+        name: "usage",
+        description: "Tampilkan pemakaian token & biaya sesi ini dan hari ini",
+        execute: async ({ sessionID, prompt, delivery }) => {
+          try {
+            const text = buildReport(readLogFile(LOG_FILE), sessionID, new Date())
+            await ctx.session.prompt({ ...prompt, sessionID, text, delivery })
+          } catch (err) {
+            console.warn("[token-tracker] /usage gagal:", err instanceof Error ? err.message : err)
+          }
+        },
+      })
+    })
+
     return () => controller.abort()
   },
 })
