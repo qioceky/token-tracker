@@ -2,13 +2,11 @@
 
 import { Plugin } from "@opencode/plugin"
 import { appendFileSync, mkdirSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
-import { buildReport, parseLogLine, readLogFile } from "./lib.ts"
+import { dirname } from "node:path"
+import { buildReport, parseLogLine, readLogFile, TOKEN_LOG_FILE } from "./lib.ts"
 import type { LogEntry } from "./lib.ts"
 
-const LOG_DIR = join(homedir(), ".config", "opencode", "logs", "token-tracker")
-const LOG_FILE = join(LOG_DIR, "tokens.jsonl")
+const LOG_FILE = TOKEN_LOG_FILE
 
 // Sesi -> id pesan yang sudah tercatat di log (dimuat dari JSONL saat startup)
 const logged = new Map<string, Set<string>>()
@@ -29,7 +27,7 @@ function loadLoggedIds(): void {
 
 function appendEntry(entry: Omit<LogEntry, "type">): void {
   try {
-    mkdirSync(LOG_DIR, { recursive: true })
+    mkdirSync(dirname(LOG_FILE), { recursive: true })
     appendFileSync(LOG_FILE, JSON.stringify({ type: "tokens", ...entry }) + "\n")
   } catch {
     // never-throw: jangan pernah mengganggu server karena bug log

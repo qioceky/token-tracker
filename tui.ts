@@ -1,7 +1,7 @@
 // tui.ts — plugin TUI token-tracker: toast per pesan assistant selesai (tanpa JSX)
 
 import { Plugin } from "@opencode/plugin/tui"
-import { formatCost, formatTokens } from "./lib.ts"
+import { formatCost, formatTokens, readLogFile, selectUntracked, TOKEN_LOG_FILE } from "./lib.ts"
 
 type Msg = {
   id: string
@@ -13,8 +13,17 @@ type Msg = {
 export default Plugin.define({
   id: "token-tracker.tui",
   setup(context: any) {
-    // Sesi -> id pesan yang sudah di-toast (hindari toast ganda saat event ter-publish ulang)
+    // Sesi -> id pesan yang sudah di-toast. Seed dari JSONL (sumber kebenaran yang sama
+    // dengan server) agar resume sesi lama TIDAK membanjiri toast dengan seluruh histori.
     const toasted = new Map<string, Set<string>>()
+    for (const e of readLogFile(TOKEN_LOG_FILE)) {
+      let set = toasted.get(e.sessionId)
+      if (!set) {
+        set = new Set()
+        toasted.set(e.sessionId, set)
+      }
+      set.add(e.messageId)
+    }
     // Sesi -> total berjalan (token, cost) pesan yang sudah di-toast
     const totals = new Map<string, { tokens: number; cost: number }>()
 
@@ -47,13 +56,9 @@ export default Plugin.define({
           totals.set(sessionId, t)
         }
 
-        for (const msg of messages) {
-          if (msg?.type !== "assistant") continue
-          const tokens = msg.tokens
-          if (!tokens || typeof tokens.input !== "number") continue
-          if (done.has(msg.id)) continue
+        for (const msg of selectUntracked(messages, done)) {
           done.add(msg.id)
-          const total = (tokens.input ?? 0) + (tokens.output ?? 0)
+          const total = (msg.tokens?.input ?? 0) + (msg.tokens?.output ?? 0)
           const cost = typeof msg.cost === "number" ? msg.cost : 0
           t.tokens += total
           t.cost += cost

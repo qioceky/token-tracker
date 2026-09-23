@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { buildReport, formatCost, formatTokens, parseLogLine, readLogFile, startOfToday, summarizeEntries } from "../lib.ts"
+import { buildReport, formatCost, formatTokens, parseLogLine, readLogFile, selectUntracked, startOfToday, summarizeEntries } from "../lib.ts"
 import type { LogEntry } from "../lib.ts"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -83,6 +83,27 @@ test("readLogFile: lewati baris malformed", () => {
 
 test("readLogFile: file tidak ada", () => {
   assert.deepEqual(readLogFile("/nonexistent/path.jsonl"), [])
+})
+
+test("selectUntracked: hanya pesan assistant baru dgn tokens", () => {
+  const known = new Set(["m-historis1", "m-historis2"])
+  const messages = [
+    { id: "m-historis1", type: "assistant", tokens: { input: 100 } }, // sudah pernah di-toast
+    { id: "m-historis2", type: "assistant", tokens: { input: 50 } },
+    { id: "m-baru", type: "assistant", tokens: { input: 10, output: 20 } }, // baru → dipilih
+    { id: "m-user", type: "user", tokens: { input: 5 } }, // bukan assistant → tidak
+    { id: "m-tanpa-token", type: "assistant" }, // tanpa tokens → tidak
+  ]
+  const picked = selectUntracked(messages, known)
+  assert.deepEqual(picked.map((m) => m.id), ["m-baru"])
+})
+
+test("selectUntracked: known kosong pilih semua assistant dgn token", () => {
+  const messages = [
+    { id: "a", type: "assistant", tokens: { input: 1 } },
+    { id: "b", type: "user", tokens: { input: 1 } },
+  ]
+  assert.deepEqual(selectUntracked(messages, new Set()).map((m) => m.id), ["a"])
 })
 
 test("buildReport: tanpa data tetap berformat", () => {

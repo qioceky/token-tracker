@@ -1,6 +1,11 @@
 // lib.ts — fungsi murni token-tracker (tanpa import OpenCode, unit-testable)
 
 import { existsSync, readFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
+
+// Path log bersama (dipakai index.ts server maupun tui.ts untuk seed dedupe)
+export const TOKEN_LOG_FILE = join(homedir(), ".config", "opencode", "logs", "token-tracker", "tokens.jsonl")
 
 export interface LogEntry {
   type: "tokens"
@@ -111,6 +116,17 @@ export function readLogFile(path: string): LogEntry[] {
   } catch {
     return []
   }
+}
+
+// Seleksi pesan assistant yang punya token usage dan belum tercatat/toast
+export interface TrackableMsg {
+  id: string
+  type?: string
+  tokens?: { input?: number }
+}
+
+export function selectUntracked<T extends TrackableMsg>(messages: readonly T[], known: ReadonlySet<string>): T[] {
+  return messages.filter((m) => m?.type === "assistant" && typeof m.tokens?.input === "number" && !known.has(m.id))
 }
 
 export function buildReport(entries: readonly LogEntry[], sessionId: string, now: Date): string {
