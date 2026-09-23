@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { buildReport, formatCost, formatTokens, parseLogLine, readLogFile, selectUntracked, startOfToday, summarizeEntries } from "../lib.ts"
+import { buildReport, createDebouncer, formatCost, formatTokens, parseLogLine, readLogFile, selectUntracked, startOfToday, summarizeEntries } from "../lib.ts"
 import type { LogEntry } from "../lib.ts"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -52,6 +52,12 @@ test("parseLogLine: input buruk", () => {
   assert.equal(parseLogLine(JSON.stringify({ type: "other" })), null)
   assert.equal(parseLogLine(JSON.stringify({ type: "tokens", sessionId: "s1" })), null) // tanpa messageId
   assert.equal(parseLogLine(JSON.stringify({ type: "tokens", messageId: "m1" })), null) // tanpa sessionId
+})
+
+test("parseLogLine: ts buruk di-drop, tidak di-backfill Date.now()", () => {
+  assert.equal(parseLogLine(JSON.stringify({ type: "tokens", ts: "abc", sessionId: "s1", messageId: "m1" })), null)
+  assert.equal(parseLogLine(JSON.stringify({ type: "tokens", ts: -5, sessionId: "s1", messageId: "m1" })), null)
+  assert.equal(parseLogLine(JSON.stringify({ type: "tokens", sessionId: "s1", messageId: "m1" })), null) // ts hilang
 })
 
 test("summarizeEntries: filter sesi + since", () => {
@@ -122,4 +128,52 @@ test("buildReport: berisi baris sesi + hari ini", () => {
   assert.match(report, /Hari ini \(semua sesi\)/)
   assert.match(report, /1\.5k/) // 1000+500 token sesi
   assert.match(report, /biaya: \$[\d.]+\s*\| 1 pesan/)
+})
+
+test("buildReport: total hari ini menjumlah semua sesi, exclude di luar hari ini", () => {
+  const now = new Date("2026-09-23T12:00:00.000Z")
+  const start = startOfToday(now)
+  const entries: LogEntry[] = [
+    { type: "tokens", ts: start + 60_000, sessionId: "s1", messageId: "m1", input: 1000, output: 500, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0.01 },
+    { type: "tokens", ts: start + 120_000, sessionId: "s2", messageId: "m2", input: 200, output: 100, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0.02 },
+    { type: "tokens", ts: start - 36_000_000, sessionId: "s1", messageId: "m3", input: 999999, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0.05 }, // sebelum awal hari → tidak masuk "Hari ini"
+  ]
+  const report = buildReport(entries, "s1", now)
+  // 1800 token (s1: 1500 + s2: 300), biaya 0.03 → "$0.030" (formatCost 3 desimal); m3 dikecualikan
+  assert.match(report, /^  token: 1\.8k \| biaya: \$0\.030$/m)
+  assert.doesNotMatch(report, /^  token: 1\.1M /m)
+})
+
+test("createDebouncer: push cepat per sesi → run sekali (batch)", async () => {
+  const runs: { sessionId: string; n: number }[][] = []
+  const d = createDebouncer<{ sessionId: string; n: number }>((batch) => runs.push(batch), 30)
+  d.push({ sessionId: "a", n: 1 })
+  d.push({ sessionId: "a", n: 2 })
+  d.push({ sessionId: "a", n: 3 })
+  await new Promise((r) => setTimeout(r, 10))
+  assert.equal(runs.length, 0) // masih dalam jendela debounce
+  await new Promise((r) => setTimeout(r, 40))
+  assert.equal(runs.length, 1)
+  assert.deepEqual(runs[0].map((p) => p.n), [1, 2, 3])
+})
+
+test("createDebouncer: sesi berbeda → run terpisah", async () => {
+  const runs: string[][] = []
+  const d = createDebouncer<{ sessionId: string }>((batch) => runs.push(batch.map((p) => p.sessionId)), 20)
+  d.push({ sessionId: "a" })
+  d.push({ sessionId: "b" })
+  await new Promise((r) => setTimeout(r, 40))
+  assert.equal(runs.length, 2)
+  assert.deepEqual(runs, [["a"], ["b"]])
+})
+
+test("createDebouncer: flushAll langsung tanpa menunggu, tidak dobel", async () => {
+  const runs: string[][] = []
+  const d = createDebouncer<{ sessionId: string }>((batch) => runs.push(batch.map((p) => p.sessionId)), 200)
+  d.push({ sessionId: "a" })
+  await d.flushAll()
+  assert.equal(runs.length, 1)
+  assert.deepEqual(runs[0], ["a"])
+  await new Promise((r) => setTimeout(r, 250))
+  assert.equal(runs.length, 1) // timer kadaluarsa setelah flush tidak dobel
 })

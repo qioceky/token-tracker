@@ -73,9 +73,12 @@ export function parseLogLine(line: string): LogEntry | null {
   }
   if (raw.type !== "tokens") return null
   if (typeof raw.sessionId !== "string" || typeof raw.messageId !== "string") return null
+  const ts = toNum(raw.ts)
+  // ts hilang/buruk → drop baris (jangan backfill Date.now() yang menggeser hitungan "Hari ini")
+  if (!Number.isFinite(ts) || ts <= 0) return null
   return {
     type: "tokens",
-    ts: toNum(raw.ts) || Date.now(),
+    ts,
     sessionId: raw.sessionId,
     messageId: raw.messageId,
     agent: typeof raw.agent === "string" ? raw.agent : undefined,
@@ -127,6 +130,51 @@ export interface TrackableMsg {
 
 export function selectUntracked<T extends TrackableMsg>(messages: readonly T[], known: ReadonlySet<string>): T[] {
   return messages.filter((m) => m?.type === "assistant" && typeof m.tokens?.input === "number" && !known.has(m.id))
+}
+
+// ---- Debouncer per sesi ----
+
+export interface DebouncePayload {
+  sessionId: string
+}
+
+export interface Debouncer<T extends DebouncePayload> {
+  push(payload: T): void
+  flushAll(): Promise<void>
+}
+
+// Men-debounce pekerjaan mahal per sesi (mis. reconcile): banyak event dalam satu
+// sesi dibatch jadi SATU run setelah jeda waitMs. flushAll() menjamin tidak ada
+// payload tertinggal saat plugin berhenti (tanpa kehilangan event terakhir).
+export function createDebouncer<T extends DebouncePayload>(run: (batch: T[]) => void, waitMs: number): Debouncer<T> {
+  const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; items: T[] }>()
+
+  async function flush(sessionId: string): Promise<void> {
+    const hit = pending.get(sessionId)
+    if (!hit) return
+    pending.delete(sessionId)
+    clearTimeout(hit.timer)
+    run(hit.items)
+  }
+
+  return {
+    push(payload: T): void {
+      const hit = pending.get(payload.sessionId)
+      if (hit) {
+        // perpanjang jendela & kumpulkan payload sesi yang sama
+        hit.items.push(payload)
+        clearTimeout(hit.timer)
+        hit.timer = setTimeout(() => void flush(payload.sessionId), waitMs)
+      } else {
+        const items = [payload]
+        const timer = setTimeout(() => void flush(payload.sessionId), waitMs)
+        pending.set(payload.sessionId, { timer, items })
+      }
+    },
+    async flushAll(): Promise<void> {
+      for (const sessionId of [...pending.keys()]) await flush(sessionId)
+    },
+  }
 }
 
 export function buildReport(entries: readonly LogEntry[], sessionId: string, now: Date): string {

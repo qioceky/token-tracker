@@ -3,10 +3,14 @@
 import { Plugin } from "@opencode/plugin"
 import { appendFileSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
-import { buildReport, parseLogLine, readLogFile, TOKEN_LOG_FILE } from "./lib.ts"
+import { buildReport, createDebouncer, readLogFile, TOKEN_LOG_FILE } from "./lib.ts"
 import type { LogEntry } from "./lib.ts"
 
 const LOG_FILE = TOKEN_LOG_FILE
+
+// Batas jeda warning reconcile per sesi (anti-spam saat context() selalu gagal)
+const RECONCILE_WARN_MS = 5 * 60_000
+const reconcileWarnAt = new Map<string, number>()
 
 // Sesi -> id pesan yang sudah tercatat di log (dimuat dari JSONL saat startup)
 const logged = new Map<string, Set<string>>()
@@ -77,7 +81,12 @@ async function reconcile(ctx: any, sessionId: string): Promise<void> {
       })
     }
   } catch (err) {
-    console.warn("[token-tracker] reconcile gagal:", err instanceof Error ? err.message : err)
+    const lastWarn = reconcileWarnAt.get(sessionId) ?? 0
+    const now = Date.now()
+    if (now - lastWarn >= RECONCILE_WARN_MS) {
+      reconcileWarnAt.set(sessionId, now)
+      console.warn("[token-tracker] reconcile gagal:", sessionId, err instanceof Error ? err.message : err)
+    }
   }
 }
 
@@ -87,6 +96,11 @@ export default Plugin.define({
     loadLoggedIds()
 
     const controller = new AbortController()
+    // Debounce reconcile per sesi: event eksekusi yang ramai (banyak per turn) dibatch
+    const debouncer = createDebouncer<{ sessionId: string }>(
+      (batch) => Promise.all(batch.map((p) => reconcile(ctx, p.sessionId))) as unknown as void,
+      300,
+    )
     void (async () => {
       try {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
@@ -94,7 +108,7 @@ export default Plugin.define({
           const sessionId = extractSessionID(event)
           if (!sessionId) continue
           if (type === "session.idle" || RECONCILE_RE.test(type)) {
-            await reconcile(ctx, sessionId)
+            debouncer.push({ sessionId })
           }
         }
       } catch (err) {
@@ -117,6 +131,9 @@ export default Plugin.define({
       })
     })
 
-    return () => controller.abort()
+    return async () => {
+      controller.abort()
+      await debouncer.flushAll()
+    }
   },
 })
