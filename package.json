@@ -1,13 +1,28 @@
 {
   "name": "token-tracker",
   "version": "0.1.0",
-  "private": true,
+  "description": "Pelacak token & biaya untuk OpenCode (V2): catat ke JSONL, toast per pesan, perintah /usage.",
+  "private": false,
   "type": "module",
   "main": "./index.ts",
   "exports": {
     ".": "./index.ts",
     "./tui": "./tui.ts"
   },
+  "files": [
+    "index.ts",
+    "lib.ts",
+    "tui.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "opencode",
+    "plugin",
+    "tokens",
+    "usage",
+    "tracker"
+  ],
+  "license": "MIT",
   "dependencies": {
     "@opencode/plugin": "2.0.14"
   }
