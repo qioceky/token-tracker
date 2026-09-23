@@ -25,10 +25,13 @@ Gunakan `token-tracker-0.1.0.tgz` (hasilkan ulang kapan saja dengan `npm pack`):
 4. `opencode service restart`.
 
 ### Opsi B — remote git (produksi)
-1. Push repo ini ke git host (mis. GitHub). Pastikan `package.json` ikut ter-commit
-   (sudah). Jangan commit `node_modules/` (ada di `.gitignore`).
-2. Di perangkat baru: `opencode plugin add token-tracker@git+https://host/user/token-tracker`.
+Repo sudah live di **github.com/qioceky/token-tracker** (branch `master`).
+
+1. Di perangkat baru: `opencode plugin add token-tracker@git+https://github.com/qioceky/token-tracker.git`
    Installer meng-clone lalu memasang dependensi otomatis.
+2. Perbarui repo setelah ada komit baru di bagian lain:
+   `git -C ~/.config/opencode/plugins/token-tracker push origin master` 
+   (butuh push akses — pemilik repo).
 
 Log tetap dibuat di `~/.config/opencode/logs/token-tracker/tokens.jsonl` (per pengguna).
 
